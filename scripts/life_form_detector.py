@@ -72,13 +72,20 @@ if __name__ == '__main__':
             whyco=drone_position
             
             while not equals([k,j,10],whyco) :
+                
                 rospy.loginfo(whyco)
                 if alien_type>1:
                     is_alien_meet=True
-                    k=centroid_x
-                    j=centroid_y
+                    while True:
+                        swift.center_of_frame_pid(centroid_x,centroid_y) 
+                        swift_drone.pid() 
+                        rospy.loginfo(f"{j} {k} 000000000000000000000000000")
+                        swift.sets(swift_drone,drone_position)
+                        #Subscribe a topic to break the loop 
+                if is_alien_meet:
                     
-                    
+                    #Subscribe a topic to break the loop
+                    pass
                     
                 rospy.loginfo(f"{j} {k} 000000000000000000000000000")
                 swift_drone.pid() 

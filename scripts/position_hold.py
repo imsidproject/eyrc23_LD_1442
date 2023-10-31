@@ -226,8 +226,9 @@ class swift():
         self.pitch_error_pub.publish(self.error[1])
         self.roll_error_pub.publish(self.error[0])
         posi=self.drone_position
-
-
+    
+    def center_of_frame_pid(self,centrod_x,centroid_y):
+        pass
 #if __name__ == '__main__':
 
     #swift_drone = swift(2,2,20)
