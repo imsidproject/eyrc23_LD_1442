@@ -14,10 +14,10 @@ rate=None
 pub =None
 def get_frame(data):
     br = CvBridge()
-    if data !=None:
-        current_frame = br.imgmsg_to_cv2(data)
-        rospy.loginfo("frame recieved")
-        detect_alien(current_frame)
+    current_frame = br.imgmsg_to_cv2(data)
+    rospy.loginfo("frame recieved")
+    detect_alien(current_frame)
+    
     
 
 def get_Center(contour):
@@ -88,14 +88,15 @@ def detect_alien(image):
     alien_detection.alien_type=0
     alien_detection.centroid_x=-1
     alien_detection.centroid_y=-1
-    while not rospy.is_shutdown():
-        alien_detection.alien_type=len(centroids)
-        if len(centroids) !=0:
+    cv2.imshow("jj",image)
+    cv2.waitKey(20)
+    alien_detection.alien_type=len(centroids)
+    if len(centroids) !=0:
             alien_detection.centroid_x=centroids[0][0]
             alien_detection.centroid_y=centroids[0][1]
-        pub.publish(alien_detection)
-        rospy.loginfo("data publised")
-        rate.sleep()
+    pub.publish(alien_detection)
+    rospy.loginfo("data publised")
+    rate.sleep()
         
 
 if __name__ == '__main__':

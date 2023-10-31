@@ -65,6 +65,7 @@ if __name__ == '__main__':
     swift.sets(swift_drone,[k,j,10])
     whyco=[0,0,0]
     is_alien_meet=False
+    is_going_to_research_station=False
         
     while not rospy.is_shutdown():
         
@@ -74,18 +75,17 @@ if __name__ == '__main__':
             while not equals([k,j,10],whyco) :
                 
                 rospy.loginfo(whyco)
-                if alien_type>1:
-                    is_alien_meet=True
-                    while True:
-                        swift.center_of_frame_pid(centroid_x,centroid_y) 
-                        swift_drone.pid() 
-                        rospy.loginfo(f"{j} {k} 000000000000000000000000000")
-                        swift.sets(swift_drone,drone_position)
-                        #Subscribe a topic to break the loop 
-                if is_alien_meet:
-                    
-                    #Subscribe a topic to break the loop
-                    pass
+                if not is_going_to_research_station:
+                    if alien_type>1:
+                        is_alien_meet=True
+                        while True:
+                            swift.center_of_frame_pid(centroid_x,centroid_y) 
+                            swift_drone.pid() 
+                            rospy.loginfo(f"{j} {k} 000000000000000000000000000")
+                            swift.sets(swift_drone,drone_position)
+                            #Subscribe a topic to break the loop 
+                    if is_alien_meet:
+                        break
                     
                 rospy.loginfo(f"{j} {k} 000000000000000000000000000")
                 swift_drone.pid() 
@@ -98,7 +98,7 @@ if __name__ == '__main__':
                 alien_info.whycon_y=drone_position[1]
                 alien_info.whycon_z=drone_position[2]
                 alien_data_pub.publish(alien_info)
-                
+                is_going_to_research_station=True
                 swift.sets(swift_drone,[11,11,37]) 
                 
                 
