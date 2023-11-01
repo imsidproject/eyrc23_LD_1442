@@ -69,7 +69,7 @@ if __name__ == '__main__':
         
     while not rospy.is_shutdown():
         
-        while True:
+        
             whyco=drone_position
             
             while not equals([k,j,10],whyco) :
@@ -79,7 +79,7 @@ if __name__ == '__main__':
                     if alien_type>1:
                         is_alien_meet=True
                         while True:
-                            swift.center_of_frame_pid(centroid_x,centroid_y) 
+                            swift.center_of_frame_pid(swift_drone,centroid_x,centroid_y) 
                             swift_drone.pid() 
                             rospy.loginfo(f"{j} {k} 000000000000000000000000000")
                             swift.sets(swift_drone,drone_position)
