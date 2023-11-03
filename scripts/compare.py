@@ -16,16 +16,15 @@ count=0
 
 def equals(cor1,cor2) ->bool:
     if cor1 ==cor2: return True 
-    if count==0:
-        if cor1[0]==int(cor2[0]) :
-            if cor1[1]==int(cor2[1]) :
+    
+    if cor1[0]==int(cor2[0]) :
+        if cor1[1]==int(cor2[1]) :
+            if count==0:
                 if cor1[2]==int(cor2[2]) :
                     return True
-    else:
-        if cor1[0]==int(cor2[0]) :
-            if cor1[1]==int(cor2[1]) :
-                #if cor1[2]==int(cor2[2]) :
-                    return True
+                return False
+            return True    
+
                 
 def whycon_callback(msg):
         global drone_position
