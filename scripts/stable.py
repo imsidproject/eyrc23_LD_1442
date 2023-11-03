@@ -67,8 +67,11 @@ if __name__ == '__main__':
                     swift_drone.pid()
                     rospy.loginfo(f"stable")
                 else:
-                    swift_drone.center_of_frame_pid(swift_drone,centroid_x,centroid_y) 
-                    is_other_pid_active_pub.publish(True)         
+                    #comment this when working on center_of_frame_pid()
+                    swift_drone.pid()
+                    rospy.loginfo(f"other pid at work")
+                    #swift_drone.center_of_frame_pid(swift_drone,centroid_x,centroid_y) 
+                    #is_other_pid_active_pub.publish(True)         
             else:
                 swift_drone.center_of_frame_pid(swift_drone,centroid_x,centroid_y) 
                 alien_info=Biolocation()
@@ -82,6 +85,5 @@ if __name__ == '__main__':
             swift.sets(swift_drone,[11,11,37]) 
             swift_drone.pid()
             rospy.loginfo(f"Going to research station") 
-                          
         r.sleep()
     rospy.spin()    

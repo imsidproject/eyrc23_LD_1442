@@ -37,6 +37,7 @@ if __name__ == '__main__':
     rospy.init_node("path_decider")
     rospy.Subscriber('alien_data', AlienDetection,alien_detection,queue_size=10)
     rospy.Subscriber('otherPidActive',Bool,other_pid_active,queue_size=10)
+    is_alien_meet_pub=rospy.Publisher('alienMeet',Bool,queue_size=10)
 
     next_coordinate_pub=rospy.Publisher('nextCoordinate',Coordinate,queue_size=10)
     r = rospy.Rate(33)
@@ -44,7 +45,9 @@ if __name__ == '__main__':
     j=0
     k=0
     is_change=False
-    is_sec=False
+    is_going_neg_x=True
+    is_going_pos_x=False
+    is_apppopriate_pos=False
     count=0
     is_alien_meet=False
     
@@ -63,17 +66,65 @@ if __name__ == '__main__':
                     if alien_type>1:
                         is_alien_meet=True
                         continue
-                    #path planning    
-                    #rospy.loginfo(f"ne{j} {k}+''''''''''''''''''''''''''''''''''''''''''''''''''''''")
-                    if is_change and not is_sec:
-                        j-=5
-                        if j==-10:
-                            is_sec=True
+                    #path planning 
+
+                    if is_going_pos_x and is_apppopriate_pos:
+                            if is_change :
+                                if j==-10:
+                                        k+=2
+                                        is_change=False
+                                if j!=-10:
+                                    j-=10
+                            if not is_change:
+                                if j==10:
+                                        is_change=True 
+                                        k+=2 
+                                if j!=10:    
+                                    j+=10
+                            if k==10 and j==10:
+                                is_going_neg_x=False
+                                is_going_pos_x=False
+                        
+
+                                        
+                    if not is_going_neg_x and not is_apppopriate_pos:
+                        k=0
+                        is_apppopriate_pos=True
+
+
+
+                    if is_going_neg_x:
+                            if is_change :
+                                if j==-10:
+                                        k-=2
+                                        is_change=False
+                                        
+                                if j!=-10:
+                                    j-=10
+                                    
+                                                    
+                            if not is_change:
+                                if j==10:
+                                        is_change=True 
+                                        k-=2 
+                                
+                                if j!=10:           
+                                    j+=10
+                                    
+                            if k==-10 and j==10:
+                                is_going_neg_x=False
+                                is_going_pos_x=True
+                                is_change=False
+
+                    # if is_change and not is_sec:
+                    #     j-=10
+                    #     if j==-10:
+                    #         is_sec=True
                             
-                    if not is_change:
-                        j+=5
-                        if j==10:
-                            is_change=True
+                    # if not is_change:
+                    #     j+=10
+                    #     if j==10:
+                    #         is_change=True
                     coordinate=Coordinate()
                     coordinate.x=k
                     coordinate.y=j
@@ -89,7 +140,7 @@ if __name__ == '__main__':
                         next_coordinate_pub.publish(init_coordinate)    
                         rospy.loginfo(f"Initial coordinate Published {k}, {j}, ................................")   
             else:
-                is_alien_meet.publised(True)
+                is_alien_meet_pub.publish(True)
                 init_coordinate=Coordinate()
                 init_coordinate.x=k
                 init_coordinate.y=j
