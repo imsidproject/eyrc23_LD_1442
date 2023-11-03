@@ -54,6 +54,7 @@ add_message_files(
   Biolocation.msg
   Info.msg
   AlienDetection.msg
+  Coordinate.msg
 )
 
 ## Generate services in the 'srv' folder

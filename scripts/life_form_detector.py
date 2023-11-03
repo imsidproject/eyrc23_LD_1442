@@ -6,16 +6,19 @@ import cv2
 import rospy
 from geometry_msgs.msg import PoseArray
 import time
-from luminosity_drone.msg import AlienDetection, Biolocation
+from std_msgs.msg import Bool
+from luminosity_drone.msg import AlienDetection, Biolocation,Coordinate
 
-
-
-drone_position=[0,0,0]
+arrived=False
 alien_type=0
 centroid_x=-1
 centroid_y=-1
 frame=None
-
+is_other_pid_active=False
+def other_pid_active(msg):
+    global is_other_pid_active
+    is_other_pid_active = msg.data
+    
 def alien_detection(data):
     global alien_type, centroid_x, centroid_y
     alien_type=data.alien_type
@@ -25,97 +28,78 @@ def alien_detection(data):
 
 
 
+def is_arrived(msg):
+    global arrived 
+    arrived=msg.data
+    
 
-
-    
-    
-def equals(cor1,cor2) ->bool:
-    if cor1 ==cor2: return True 
-    if cor1[0]==int(cor2[0]) or cor1[0]==int(cor2[0]+1):
-         if cor1[1]==int(cor2[1]) or cor1[1]==int(cor2[1]+1):
-             if cor1[2]==int(cor2[2]) or cor1[2]==int(cor2[2]+1):
-                return True
-    return False     
-def whycon_callback(msg):
-        global drone_position
-        drone_position[0] = msg.poses[0].position.x
-        drone_position[1] = msg.poses[0].position.y
-        drone_position[2] = msg.poses[0].position.z
-def get_alien_type(type) -> str:
-    if type ==2:
-        return 'alien_a'
-    elif type ==3:
-        return "alien_b" 
-    
-        return "alien_c"                  
-    
 if __name__ == '__main__':
-    
-    rospy.Subscriber('whycon/poses', PoseArray, whycon_callback)
+    rospy.init_node("path_decider")
     rospy.Subscriber('alien_data', AlienDetection,alien_detection,queue_size=10)
-    
-    
-    swift_drone = swift()
-    alien_data_pub=rospy.Publisher('astrobiolocation',Biolocation,queue_size=10)
+    rospy.Subscriber('otherPidActive',Bool,other_pid_active,queue_size=10)
+
+    next_coordinate_pub=rospy.Publisher('nextCoordinate',Coordinate,queue_size=10)
     r = rospy.Rate(33)
+    rospy.Subscriber('isArrived',Bool,is_arrived,queue_size=10)
     j=0
     k=0
     is_change=False
     is_sec=False
-    swift.sets(swift_drone,[k,j,10])
-    whyco=[0,0,0]
+    count=0
     is_alien_meet=False
-    is_going_to_research_station=False
-        
-    while not rospy.is_shutdown():
-        
-        
-            whyco=drone_position
-            
-            while not equals([k,j,10],whyco) :
-                
-                rospy.loginfo(whyco)
-                if not is_going_to_research_station:
-                    if alien_type>1:
-                        is_alien_meet=True
-                        while True:
-                            swift.center_of_frame_pid(swift_drone,centroid_x,centroid_y) 
-                            swift_drone.pid() 
-                            rospy.loginfo(f"{j} {k} 000000000000000000000000000")
-                            swift.sets(swift_drone,drone_position)
-                            #Subscribe a topic to break the loop 
-                    if is_alien_meet:
-                        break
-                    
-                rospy.loginfo(f"{j} {k} 000000000000000000000000000")
-                swift_drone.pid() 
-                whyco=drone_position
-                r.sleep()
-            if is_alien_meet:
-                alien_info=Biolocation()
-                alien_info.deserialize_numpy=get_alien_type(alien_type)
-                alien_info.whycon_x=drone_position[0]
-                alien_info.whycon_y=drone_position[1]
-                alien_info.whycon_z=drone_position[2]
-                alien_data_pub.publish(alien_info)
-                is_going_to_research_station=True
-                swift.sets(swift_drone,[11,11,37]) 
-                
-                
-            rospy.loginfo(f"{j} {k}+''''''''''''''''''''''''''''''''''''''''''''''''''''''")
-            if not is_alien_meet:
-                if is_change and not is_sec:
-                    j-=1
-                    if j==-10:
-                        is_sec=True
-                        
-                if not is_change:
-                    j+=1
-                    if j==10:
-                        is_change=True
-                swift.sets(swift_drone,[k,j,10])        
-            
-        
-        
     
 
+        
+    while not rospy.is_shutdown():
+        if not is_other_pid_active:
+            
+            if not is_alien_meet:
+                if arrived:                
+                        #rospy.loginfo("Not arrived till now")
+                    
+                    arrived=False
+                    rospy.loginfo("Arrived................................")
+                    count+=1
+                    if alien_type>1:
+                        is_alien_meet=True
+                        continue
+                    #path planning    
+                    #rospy.loginfo(f"ne{j} {k}+''''''''''''''''''''''''''''''''''''''''''''''''''''''")
+                    if is_change and not is_sec:
+                        j-=5
+                        if j==-10:
+                            is_sec=True
+                            
+                    if not is_change:
+                        j+=5
+                        if j==10:
+                            is_change=True
+                    coordinate=Coordinate()
+                    coordinate.x=k
+                    coordinate.y=j
+                    coordinate.z=10        
+                    next_coordinate_pub.publish(coordinate)    
+                    rospy.loginfo(f"Next coordinate Published {k}, {j}................................")
+                else:
+                    
+                        init_coordinate=Coordinate()
+                        init_coordinate.x=k
+                        init_coordinate.y=j
+                        init_coordinate.z=27
+                        next_coordinate_pub.publish(init_coordinate)    
+                        rospy.loginfo(f"Initial coordinate Published {k}, {j}, ................................")   
+            else:
+                is_alien_meet.publised(True)
+                init_coordinate=Coordinate()
+                init_coordinate.x=k
+                init_coordinate.y=j
+                init_coordinate.z=27
+                next_coordinate_pub.publish(init_coordinate)    
+                rospy.loginfo(f"Stable when alien met {k}, {j}, ................................")  
+        else:
+            rospy.loginfo(f"Other pid Active")  
+
+        r.sleep()
+    rospy.spin()    
+                
+            
