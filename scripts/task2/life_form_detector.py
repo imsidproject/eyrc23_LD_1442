@@ -4,8 +4,8 @@
 # Team ID:          eYRC#LD#1442
 # Theme:            Luminosity Drone
 # Author List:      Rupankar Podder, Sidharth Kumar Priyadarshi, Kausar Kamal
-# Filename:         position_hold.py
-# Functions:        None
+# Filename:         life_form_detector.py
+# Functions:        fly_to_coord,
 # Global variables: None
 
 
@@ -14,14 +14,13 @@ This node publishes and subsribes the following topics:
 
 		PUBLICATIONS			SUBSCRIPTIONS
 		/drone_command			/whycon/poses
-		/alt_error				/pid_tuning_altitude
-		/pitch_error			/pid_tuning_pitch
-		/roll_error				/pid_tuning_roll
+		/alt_error              /swift/camera_rgb/image_raw
+		/pitch_error
+		/roll_error
+        /astrobiolocation
+
 					
 								
-
-Rather than using different variables, use list. eg : self.setpoint = [1,2,3], where index corresponds to x,y,z ...rather than defining self.x_setpoint = 1, self.y_setpoint = 2
-CODE MODULARITY AND TECHNIQUES MENTIONED LIKE THIS WILL HELP YOU GAINING MORE MARKS WHILE CODE EVALUATION.	
 '''
 
 # Importing the required libraries
@@ -52,18 +51,13 @@ class swift():
         # initializing ros node with name life_form_detector
         rospy.init_node('life_form_detector')
 
-        # This corresponds to your current position of drone. This value must be updated each time in your whycon callback
-        # [x,y,z]
+        # current position of drone. updated each time in whycon callback[x,y,z]
         self.drone_position = np.zeros(3, dtype=np.float64)
-        self.image = None
+        # whether there is an organism detected in most recent frame.
         self.found_alien = False
+        # pixel coordinates of organism in the last frame with an organism
         self.alien_xy = np.zeros(3, dtype=np.float64)
         self.alien_type = None
-        # [x_setpoint, y_setpoint, z_setpoint]
-        # whycon marker at the position of the dummy given in the scene. Make the whycon marker associated with position_to_hold dummy renderable and make changes accordingly
-        # self.setpoint = np.array([[0, 0, 23], [2, 0, 23], [2, 2, 23], [
-        #     2, 2, 25], [-5, 2, 25], [-5, -3, 25], [-5, -3, 21], [7, -3, 21], [7, 0, 21], [0, 0, 19]], dtype=np.float64)
-        # self.setpointIndex = 0
 
         # Declaring a cmd of message type swift_msgs and initializing values
         self.cmd = swift_msgs()
@@ -76,15 +70,12 @@ class swift():
         self.cmd.rcAUX3 = 1500
         self.cmd.rcAUX4 = 1500
 
-        # initial setting of Kp, Kd and ki for [roll, pitch, throttle]. eg: self.Kp[2] corresponds to Kp value in throttle axis
-        # after tuning and computing corresponding PID parameters, change the parameters
-
-        # roll,pitch, throttle
+        # initial setting of Kp, Kd and ki for [roll, pitch, throttle].
         self.Kp = np.array([10, 12, 10.0], dtype=np.float64)
-        self.Ki = np.array([0.003, 0.001, 0.1], dtype=np.float64)  # ..
-        self.Kd = np.array([200, 200, 400], dtype=np.float64)  # ..
+        self.Ki = np.array([0.003, 0.001, 0.1], dtype=np.float64)
+        self.Kd = np.array([200, 200, 400], dtype=np.float64)
 
-        # -----------------------Add other required variables for pid here ----------------------------------------------
+        # -----------------------Other required variables for pid----------------------------------------------
         self.error = np.zeros(3, dtype=np.float64)  # x,y,z
         self.prev_error = np.zeros(3, dtype=np.float64)  # x,y,z
         self.sum_error = np.zeros(3, dtype=np.float64)  # x,y,z
@@ -99,7 +90,7 @@ class swift():
         # offset roll,pitch,throttle from pid calculation
         self.pid_out = np.zeros(3, dtype=np.float64)
 
-        # Publishing /drone_command, /alt_error, /pitch_error, /roll_error
+        # Creating publishers for /drone_command, /alt_error, /pitch_error, /roll_error
         self.command_pub = rospy.Publisher(
             '/drone_command', swift_msgs, queue_size=1)
         self.alt_error_pub = rospy.Publisher(
@@ -109,7 +100,7 @@ class swift():
         self.roll_error_pub = rospy.Publisher(
             "/roll_error", Float64, queue_size=1)
 
-        # Subscribing to /whycon/poses
+        # Subscribing to /whycon/poses and /swift/camera_rgb/image_raw
         rospy.Subscriber('whycon/poses', PoseArray, self.whycon_callback)
         rospy.Subscriber("/swift/camera_rgb/image_raw",
                          Image, self.image_callback)
@@ -140,60 +131,68 @@ class swift():
 
     def whycon_callback(self, msg):
         self.drone_position[0] = msg.poses[0].position.x
-        # --------------------Set the remaining co-ordinates of the drone from msg----------------------------------------------
         self.drone_position[1] = msg.poses[0].position.y
         self.drone_position[2] = msg.poses[0].position.z
-        # ---------------------------------------------------------------------------------------------------------------
 
     def image_callback(self, img_msg):
-        # Try to convert the ROS Image message to a CV2 Image
-        try:
-            cv_image = bridge.imgmsg_to_cv2(img_msg, "passthrough")
-            self.image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-            # print(self.image.shape)
-            # convert it to grayscale, and blur it
-            gray_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-            blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        '''
+        Purpose:
+        Reads image from /swift/camera_rgb/image_raw and converts it to a openCV image.
+        Performs image processing to detect the position of organisms if any
 
-            # threshold the image to reveal light regions in the blurred image
-            ret, thersholding = cv2.threshold(
-                blurred_image, 200, 255, cv2.THRESH_BINARY)
+        Returns:
+        None
+        '''
+        cv_image = bridge.imgmsg_to_cv2(img_msg, "passthrough")
+        image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        # convert it to grayscale, and blur it
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
 
-            # perform a series of erosions and dilations to remove any small blobs of noise from the thresholded image
-            kernel = np.ones((5, 5), np.uint8)
-            morph = cv2.morphologyEx(thersholding, cv2.MORPH_CLOSE, kernel)
-            morph = cv2.morphologyEx(morph, cv2.MORPH_OPEN, kernel)
-            labeled = measure.label(morph)  # finding connected components
-            # sizes of each connected component
-            sizes = np.bincount(labeled.ravel())
-            blob_sizes = sizes > 60  # ignoring small blobs
-            blob_sizes[0] = 0  # ignoring background
-            if (blob_sizes.sum() > 1):
-                self.found_alien = True
-                self.alien_type = "alien_"+chr(ord("a")+blob_sizes.sum()-2)
-                mask = blob_sizes[labeled]  # constructing a binary mask
-                # constructing mat object from binary mask
-                mask = np.array(mask, dtype=np.uint8)*255
-                # find the contours in the mask
-                contours, hir = cv2.findContours(
-                    mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # threshold the image to reveal light regions in the blurred image
+        ret, thersholding = cv2.threshold(
+            blurred_image, 200, 255, cv2.THRESH_BINARY)
 
-                self.alien_xy.fill(0)
-                for c in contours:
-                    (x, y), radius = cv2.minEnclosingCircle(c)
-                    self.alien_xy[0] += x
-                    self.alien_xy[1] += y
-                self.alien_xy /= len(contours)
-                self.alien_xy[0] -= self.image.shape[1]/2
-                self.alien_xy[1] -= self.image.shape[0]/2
-                # rospy.loginfo(str(self.alien_xy))
-            else:
-                self.found_alien = False
-        except CvBridgeError as e:
-            rospy.logerr("CvBridge Error: {0}".format(e))
+        # perform a series of erosions and dilations to remove any small blobs of noise from the thresholded image
+        kernel = np.ones((5, 5), np.uint8)
+        morph = cv2.morphologyEx(thersholding, cv2.MORPH_CLOSE, kernel)
+        morph = cv2.morphologyEx(morph, cv2.MORPH_OPEN, kernel)
+        labeled = measure.label(morph)  # finding connected components
+        # sizes of each connected component
+        sizes = np.bincount(labeled.ravel())
+        blob_sizes = sizes > 60  # ignoring small blobs
+        blob_sizes[0] = 0  # ignoring background
+        if (blob_sizes.sum() > 1):  # if 2 or more blobs are present, i.e., an alien is detected
+            self.found_alien = True
+            self.alien_type = "alien_"+chr(ord("a")+blob_sizes.sum()-2)
+            mask = blob_sizes[labeled]  # constructing a binary mask
+            # constructing mat object from binary mask
+            mask = np.array(mask, dtype=np.uint8)*255
+            # find the contours in the mask
+            contours, hir = cv2.findContours(
+                mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            # finding the centroid of the centroids of all the blobs
+            self.alien_xy.fill(0)
+            for c in contours:
+                (x, y), radius = cv2.minEnclosingCircle(c)
+                self.alien_xy[0] += x
+                self.alien_xy[1] += y
+            self.alien_xy /= len(contours)
+            # shifting origin to the center of the image
+            self.alien_xy[0] -= image.shape[1]/2
+            self.alien_xy[1] -= image.shape[0]/2
+        else:
+            self.found_alien = False
 
     def pid(self, setpoint):
-
+        '''
+        Purpose:
+        Compute the pid offset values and publish to /drone_command
+        Arguments:
+        Setpoint, the coordinates that the drone should go to
+        Returns:
+        None
+        '''
         self.error = self.drone_position - setpoint
         self.change_in_error = self.error-self.prev_error
 
@@ -222,7 +221,7 @@ class swift():
 
         # Updating previous Error
         self.prev_error[:] = self.error[:]
-
+        # publishing error along all 3 axes
         self.command_pub.publish(self.cmd)
         self.alt_error_pub.publish(self.error[2])
         self.pitch_error_pub.publish(self.error[1])
@@ -230,10 +229,21 @@ class swift():
 
 
 def fly_to_coord(swift_drone, r, setpoint, accuracy=0.2, noSleep=False):
+    """
+    Purpose:
+    Flies the drone to the given setpoint, then returns
+    Arguments:
+    swift_drone- swift object
+    r- rospy.Rate object
+    setpoint- Coordinates to move to
+    accuracy- Required accuracy in every axis
+    noSleep- When True, Returns without calling r.sleep() at the end
+    """
     setpoint = np.array(setpoint, dtype=np.float64)
     while True:
-        swift_drone.pid(setpoint)
+        swift_drone.pid(setpoint)  # call pid at intervals
         r.sleep()
+        # if drone coordinate errors within required accuracy in all 3 axes
         if np.logical_and(swift_drone.error < accuracy, swift_drone.error > -accuracy).all():
             break
     if noSleep:
@@ -243,44 +253,46 @@ def fly_to_coord(swift_drone, r, setpoint, accuracy=0.2, noSleep=False):
 if __name__ == '__main__':
 
     swift_drone = swift()
-    coords = np.array([[-7, -7, 20], [7, -7, 20], [7, -3.5, 20], [-7, -3.5, 20], [-7, 0, 20],
-                      [7, 0, 20], [7, 3.5, 20], [-7, 3.5, 20], [-7, 7, 20], [7, 7, 20]], dtype=np.float64)
-    i = 0
+    # Setpoints to cover to follow a path
+    setPoints = np.array([[-7, -7, 20], [7, -7, 20], [7, -3.5, 20], [-7, -3.5, 20], [-7, 0, 20],
+                          [7, 0, 20], [7, 3.5, 20], [-7, 3.5, 20], [-7, 7, 20], [7, 7, 20]], dtype=np.float64)
+    i = 0  # indicator for which setpoint to aim for currently
+
+    # publisher for astrobiolocation
     astro_bio_pub = rospy.Publisher(
         "/astrobiolocation", Biolocation, queue_size=1)
     biolocation = Biolocation()
     r = rospy.Rate(33)
 
     while not rospy.is_shutdown():
-        swift_drone.pid(coords[i])
+        swift_drone.pid(setPoints[i])
 
         if swift_drone.found_alien:
-            # x, y = swift_drone.drone_position[0], swift_drone.drone_position[1]
+            # loop until organism is approximately centered, break if organism is lost
             while swift_drone.found_alien and not np.logical_and(swift_drone.alien_xy < 5, swift_drone.alien_xy > -5).all():
-                rospy.loginfo("Moving towards alien:")
-                rospy.loginfo(swift_drone.drone_position +
-                              swift_drone.alien_xy/100)
-                fly_to_coord(swift_drone, r, swift_drone.drone_position +
-                             swift_drone.alien_xy/100, noSleep=True)
+                rospy.loginfo("Moving towards alien")
+                target = swift_drone.drone_position + swift_drone.alien_xy/100
+                target[2] = 20  # coordinates to target to get closer to center
+                fly_to_coord(swift_drone, r, target,
+                             accuracy=0.12, noSleep=True)
             if swift_drone.found_alien:
-                rospy.loginfo("Found Alien at: ")
-                rospy.loginfo(swift_drone.drone_position)
+                rospy.loginfo("Found Alien")
                 biolocation.organism_type = swift_drone.alien_type
                 biolocation.whycon_x = swift_drone.drone_position[0]
                 biolocation.whycon_y = swift_drone.drone_position[1]
                 biolocation.whycon_z = swift_drone.drone_position[2]
                 astro_bio_pub.publish(biolocation)
                 break
-            # if not swift_drone.found_alien:
-            #     fly_to_coord(swift_drone,r,(x,y,20),noSleep=True)
+        # if drone has come sufficintly close to setpoint, go to next setpoint
         elif np.logical_and(swift_drone.error < 0.5, swift_drone.error > -0.5).all():
             if i == 9:
                 break
             i += 1
         r.sleep()
-    # swift_drone.pid(np.array((10, 10, 28), dtype=np.float64))
-    fly_to_coord(swift_drone, r, (11, 11, 30), 0.5)
-    rospy.loginfo("done 30")
-    fly_to_coord(swift_drone, r, (11, 11, 36), 0.1)
-    rospy.loginfo("done 36")
+
+    # landing procedure:
+    fly_to_coord(swift_drone, r, (11, 11, 30), accuracy=0.5)
+    rospy.loginfo("reached 30")
+    fly_to_coord(swift_drone, r, (11, 11, 36), accuracy=0.1)
+    rospy.loginfo("reached 36")
     swift_drone.disarm()
