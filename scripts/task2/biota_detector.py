@@ -5,8 +5,8 @@
 # Theme:            Luminosity Drone
 # Author List:      Rupankar Podder, Sidharth Kumar Priyadarshi, Kausar Kamal
 # Filename:         biota_detector.py
-# Functions:        fly_to_coord,
-# Global variables: None
+# Functions:        fly_to_coord, discovered, 
+# Global variables: bridge
 
 
 This python file runs a ROS-node of name drone_control which holds the position of Swift-Drone on the given dummy.
@@ -81,6 +81,8 @@ class swift():
         self.change_in_error = np.zeros(
             3, dtype=np.float64)  # derivative of x,y,z error
 
+        # used to reset change_in_error,sum_error every time setpoint changes
+        self.pid_reset = False
         self.max_values = np.array(
             [2000, 2000, 2000], dtype=np.int16)  # roll,pitch, throttle
         self.min_values = np.array(
@@ -193,7 +195,13 @@ class swift():
         None
         '''
         self.error = self.drone_position - setpoint
-        self.change_in_error = self.error-self.prev_error
+        if self.pid_reset:
+            # if pid_reset was triggered, set derivative to 0 for all axes, and integral to 0 for x,y only
+            self.change_in_error.fill(0)
+            self.sum_error[:2].fill(0)
+            self.pid_reset = False
+        else:
+            self.change_in_error = self.error-self.prev_error
 
         # updating the integral of error
         self.sum_error += self.error
@@ -227,26 +235,30 @@ class swift():
         self.roll_error_pub.publish(self.error[0])
 
 
-def fly_to_coord(swift_drone, r, setpoint, accuracy=0.2, noSleep=False):
+def fly_to_coord(swift_drone, r, setpoint, accuracy=0.2, zaccuracy=0.2, noSleep=False):
     """
     Purpose:
     Flies the drone to the given setpoint, then returns
     Arguments:
     swift_drone- swift object
-    r- rospy.Rate object
+    r- rospy.Rate object, so that r.sleep() can be called
     setpoint- Coordinates to move to
-    accuracy- Required accuracy in every axis
+    accuracy- Required accuracy in x,y axes
+    zaccuracy- Required accuracy in z axis, separated for better adjustment
     noSleep- When True, Returns without calling r.sleep() at the end
+
     """
     setpoint = np.array(setpoint, dtype=np.float64)
+    swift_drone.pid(setpoint)
     while True:
-        swift_drone.pid(setpoint)  # call pid at intervals
         r.sleep()
-        # if drone coordinate errors within required accuracy in all 3 axes
-        if np.logical_and(swift_drone.error < accuracy, swift_drone.error > -accuracy).all():
+        swift_drone.pid(setpoint)  # call pid at intervals
+        # if drone coordinate errors are within required accuracy in all 3 axes
+        if np.logical_and(swift_drone.error[:2] < accuracy, swift_drone.error[:2] > -accuracy).all() and swift_drone.error[2] < zaccuracy and swift_drone.error[2] > -zaccuracy:
             break
-    if noSleep:
-        swift_drone.pid(setpoint)
+    if not noSleep:
+        r.sleep()
+    swift_drone.pid_reset = True  # trigger pid reset, as setpoint is likely to change
 
 
 def discovered(alienLocations, location):
@@ -256,7 +268,7 @@ def discovered(alienLocations, location):
     Arguments:
     alienLocations- ArrayList of all discovered alien locations
     location- Estimated location of detected organism
-    Returs- Boolean. True if already discovered
+    Returns- Boolean. True if already discovered
     """
     for coord in alienLocations:
         # distance between discovered organism and detected organism
@@ -272,7 +284,7 @@ if __name__ == '__main__':
 
     swift_drone = swift()
     height = 24  # normal height
-    low_height = 30  # height while moving toward organism
+    low_height = 30  # height while bringing organism to center of frame
 
     # Setpoints to cover to follow a path
     setPoints = np.array([[-7, -7, height], [7, -7, height], [7, -3.5, height], [-7, -3.5, height], [-7, 0, height],
@@ -289,28 +301,29 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
         swift_drone.pid(setPoints[i])
 
+        # if an alien has been detected such that it has not already been discovered
         if swift_drone.found_alien and not discovered(alienLocations, swift_drone.drone_position+swift_drone.alien_xy/100):
-            # if an alien has been detected such that it has not already been discovered
 
             # initial position when the organism was spotted
             x, y = swift_drone.drone_position[0], swift_drone.drone_position[1]
 
             # loop until organism is approximately centered, break if organism is lost
-            while swift_drone.found_alien and not np.logical_and(swift_drone.alien_xy < 8, swift_drone.alien_xy > -8).all():
+            while swift_drone.found_alien and not np.logical_and(swift_drone.alien_xy < 3, swift_drone.alien_xy > -3).all():
                 rospy.loginfo("Moving towards alien")
                 target = swift_drone.drone_position + swift_drone.alien_xy/100
                 # coordinates to target to get closer to center
                 target[2] = low_height
                 if discovered(alienLocations, target):
                     break
+                # fly towards estimated location
                 fly_to_coord(swift_drone, r, target,
-                             accuracy=0.12, noSleep=True)
+                             accuracy=1.8, zaccuracy=0.2)
 
             # if organism was not lost
             if swift_drone.found_alien:
                 rospy.loginfo("Found Alien")
                 pos = np.array(swift_drone.drone_position)
-                pos += swift_drone.alien_xy/140
+
                 biolocation.organism_type = swift_drone.alien_type
                 biolocation.whycon_x = pos[0]
                 biolocation.whycon_y = pos[1]
@@ -321,20 +334,21 @@ if __name__ == '__main__':
 
             # return to the path drone was following, from which it deviated to discover this organism
             fly_to_coord(swift_drone, r, (x, y, height),
-                         noSleep=True, accuracy=0.5)
+                         noSleep=True, accuracy=0.5, zaccuracy=0.5)
 
-        # if drone has come sufficintly close to setpoint, go to next setpoint
+        # if drone has come sufficintly close to setpoint, target the next setpoint
         elif np.logical_and(swift_drone.error < 0.6, swift_drone.error > -0.6).all():
             if i == 9:
                 break
             i += 1
+            swift_drone.pid_reset = True
         r.sleep()
 
     # Landing Procedure:
-    fly_to_coord(swift_drone, r, (11, 11, 30), 0.5)
+    fly_to_coord(swift_drone, r, (11, 11, 32), accuracy=0.5, zaccuracy=0.5)
     rospy.loginfo("done 30")
-    fly_to_coord(swift_drone, r, (11, 11, 36), 0.1)
+    fly_to_coord(swift_drone, r, (11, 11, 36), accuracy=0.07)
     rospy.loginfo("done 36")
     swift_drone.pid((11, 11, 37))
     swift_drone.disarm()
-    time.sleep(1)
+    time.sleep(1)  # to allow drone to come to rest, before recording stops
