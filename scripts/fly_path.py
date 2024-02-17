@@ -198,10 +198,12 @@ if __name__ == '__main__':
     r = rospy.Rate(33)
     nav = Navigation()
 
-    fly_to_coord(swift_drone, r, nav.get_start_point())
+    # fly_to_coord(swift_drone, r, nav.get_start_point())
 
     while not rospy.is_shutdown():
         err, vel = nav.get_direction(swift_drone.drone_position)
+        if err is None:
+            break
         swift_drone.pid(error=err, vel=vel)
         r.sleep()
 
