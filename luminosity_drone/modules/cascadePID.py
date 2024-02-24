@@ -45,7 +45,6 @@ from swift_msgs.msg import PIDError, RCMessage
 from swift_msgs.srv import CommandBool
 from filter import Filter
 from loc_msg.msg import AlienInfo
-from navigation import Navigation
 
 arm= True #whether to arm the drone
 
@@ -54,7 +53,6 @@ class DroneController():
         self.node= node
         self.rc_message = RCMessage()
         self.filt= Filter(node=self.node)
-        self.nav= Navigation()
 
         #initialising arming service 
         self.commandbool = CommandBool.Request()
@@ -69,15 +67,33 @@ class DroneController():
         self.delta = 1  #number of frames since last whycon pose received
 
         # roll,pitch, throttle
-        self.Kp = np.array([9.5, 9.5, 8], dtype=np.float64)
-        self.Ki = np.array([0.31, 0.31, 0.31], dtype=np.float64)  
-        self.Kd = np.array([430, 430, 230], dtype=np.float64)  
+        self.Kp = np.array([3, 3, 3], dtype=np.float64)
+        self.Ki = np.array([0.01, 0.01, 0.01], dtype=np.float64)  
+        self.Kd = np.array([30, 30, 20], dtype=np.float64)  
+
+
 
         self.error = np.zeros(3, dtype=np.float64)  # x,y,z
         self.prev_error = np.array((0,0,30),dtype= np.float64)  # x,y,z
         self.sum_error = np.zeros(3, dtype=np.float64)  # x,y,z
         self.change_in_error = np.zeros(
             3, dtype=np.float64)  # derivative of x,y,z error
+        
+
+        self.Kvp = np.array([5, 5, 4], dtype=np.float64)
+        self.Kvi = np.array([0.01, 0.01, 0.04], dtype=np.float64)
+        self.Kvd = np.array([30, 30, 20], dtype=np.float64)
+
+        self.vel_stpt = np.zeros(3, dtype=np.float64)
+        self.vel = np.zeros(3, dtype=np.float64)
+        self.vel_error = np.zeros(3, dtype=np.float64)
+        self.change_in_vel_error = np.zeros(3, dtype=np.float64)
+        self.sum_vel_error = np.zeros(3, dtype=np.float64)
+        self.prev_vel_error = np.zeros(3, dtype=np.float64)
+        self.prev_pos = np.zeros(3, dtype=np.float64)
+
+
+
         self.max_values = np.array(
             [1800, 1800, 1700], dtype=np.int16)  # roll,pitch, throttle
         self.min_values = np.array(
@@ -91,6 +107,9 @@ class DroneController():
         self.count=0
         self.land= False
         
+        self.stpts=np.float64(((2,2,23),(-2,-2,23)))
+        self.stpti= 0
+
         # Create subscriber for WhyCon , pidtune and publishers for rc_command ,PIDerror
         # Also some additional publishers for debugging/tuning
         self.whycon_sub = node.create_subscription(PoseArray,"/whycon/poses",self.whycon_poses_callback,1)
@@ -105,6 +124,7 @@ class DroneController():
     
         
         self.pid_error_pub = node.create_publisher(PIDError, "/luminosity_drone/pid_error",1)
+        self.pid_verror_pub = node.create_publisher(PIDError, "/luminosity_drone/pid_verror",1)
 
         
     def start(self):
@@ -174,64 +194,35 @@ class DroneController():
             if self.future.result().success:
                 self.node.get_logger().info("Disarm Successful")
 
-    def pid(self, setpoint=None,vel=None,error=None):
+    def pos_pid(self, setpoint):
         '''
         Purpose:
-        Compute the pid offset values and publish to /rc_command by calling publish_data_to_rpi
+        Compute the pid offset values and publish to /drone_command
         Arguments:
         Setpoint, the coordinates that the drone should go to
         Returns:
         None
         '''
 
-        if vel is None:
-            self.vel.fill(0)
-        else:
-            self.vel[:] = vel[:]
-        if error is None:
-            self.error[:] = self.drone_position  - setpoint
-        else:
-            self.error[:] = -error[:]
+        self.error[:] = setpoint - self.drone_position
+        self.change_in_error[:] = self.error-self.prev_error
+        # if self.pid_reset:
+        #     # if pid_reset was triggered, set derivative to 0 for all axes, and integral to 0 for x,y only
+        #     self.change_in_error.fill(0)
+        #     self.sum_error[:2].fill(0)
+        #     self.pid_reset = False
+        # else:
+        #     self.change_in_error = self.error-self.prev_error
 
-        self.change_in_error[:] = self.error - self.prev_error
-        self.prev_error[:] = self.error
-
-        
-        if self.pid_reset:
-            # if pid_reset was triggered, set derivative to 0 for all axes, and integral to 0 for x,y only
-            self.change_in_error.fill(0)
-            self.pid_reset = False
-        
         # updating the integral of error
-        self.sum_error += self.error
+        self.sum_error[:] += self.error
         # calculating pid
-        self.pid_out = self.Kp*self.error + self.Kd * \
+        self.vel_stpt[:] = self.Kp*self.error + self.Kd * \
             (self.change_in_error - self.vel) + self.Ki*self.sum_error
+        self.vel_pid(self.vel_stpt)
 
-        # Adding or subtracting the avg value 1500 to get value for drone command
-        self.pid_out[0] = self.base_values[0] - self.pid_out[0]
-        self.pid_out[1] = self.base_values[1] + self.pid_out[1]
-        self.pid_out[2] += self.base_values[2]
-        # Note: pid_out[] now stores the value for drone command, not the offset value
-
-        p= Pose()
-        p.position.x = self.pid_out[0]
-        p.position.y = self.pid_out[1]
-        p.position.z = self.pid_out[2]
-        self.rc_unbound_pub.publish(p)
-
-        # Checking and setting the value for drone command to lie in required range [1000,2000]
-        for i in range(3):
-            if (self.pid_out[i] > self.max_values[i]):
-                self.node.get_logger().info("max"+str(i))
-                self.pid_out[i] = self.max_values[i]
-            elif (self.pid_out[i] < self.min_values[i]):
-                self.pid_out[i] = self.min_values[i]
-                self.node.get_logger().info("min"+str(i))
-
-        self.publish_data_to_rpi(self.pid_out[0],self.pid_out[1],self.pid_out[2])
-        
-
+        # Updating previous Error
+        self.prev_error[:] = self.error[:]
         # publishing error along all 3 axes
         self.pid_error_pub.publish(
             PIDError(
@@ -242,6 +233,45 @@ class DroneController():
                 zero_error=0.0,
             )
         )
+        self.count +=1
+        if self.count ==300:
+            self.stpti =(self.stpti + 1)%2
+            self.count=0
+       
+    def vel_pid(self, vel_setpoint):
+
+        self.vel[:] = self.drone_position - self.prev_pos #/delta
+        self.prev_pos[:] = self.drone_position
+        self.vel_error[:] = vel_setpoint-self.vel
+        self.change_in_vel_error[:] = self.vel_error - self.prev_vel_error
+        self.sum_vel_error[:] += self.vel_error
+        self.prev_vel_error[:] = self.vel_error
+        self.pid_out[:] = self.Kvp*self.vel_error + self.Kvd * \
+            self.change_in_vel_error + self.Kvi*self.sum_vel_error
+        # Adding or subtracting the avg value 1500 to get value for drone command
+        self.pid_out[0] = self.base_values[0] + self.pid_out[0]
+        self.pid_out[1] = self.base_values[1] - self.pid_out[1]
+        self.pid_out[2] = self.base_values[2] -self.pid_out[2]
+        # Note: pid_out[] now stores the value for drone command, not the offset value
+
+        # Checking and setting the value for drone command to lie in required range [1000,2000]
+        for i in range(3):
+            if (self.pid_out[i] > self.max_values[i]):
+                self.pid_out[i] = self.max_values[i]
+            elif (self.pid_out[i] < self.min_values[i]):
+                self.pid_out[i] = self.min_values[i]
+
+        self.publish_data_to_rpi(self.pid_out[0],self.pid_out[1],self.pid_out[2])
+        self.pid_verror_pub.publish(
+            PIDError(
+                roll_error=float(self.vel_error[0]),
+                pitch_error=float(self.vel_error[1]),
+                throttle_error=float(self.vel_error[2]),
+                yaw_error=-0.0,
+                zero_error=0.0,
+            )
+        )
+
     def publish_data_to_rpi(self, roll, pitch, throttle):
         '''
         Purpose:
@@ -272,6 +302,7 @@ class DroneController():
         Returns:
         None
         '''
+
         if not self.whycon_pose_new:
             self.node.get_logger().info("Unable to detect WHYCON poses")
             self.delta += 1
@@ -279,13 +310,11 @@ class DroneController():
         else:
             self.whycon_pose_new= False
             self.delta = 1
+        self.pos_pid(self.stpts[self.stpti])
         
         
 
-        err, vel = self.nav.get_direction(self.drone_position)
-        if err is None:
-            self.disarm()
-        self.pid(error= err, vel= vel)
+        
 
 def main():
     rclpy.init()
